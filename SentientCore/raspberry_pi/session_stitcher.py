@@ -121,19 +121,25 @@ def _stitch(file_records: list) -> list:
 
     sessions = []
     current_group = [sorted_records[0]]
-    anchor_ts = sorted_records[0]["timestamp"]
+    current_ids   = {sorted_records[0]["hydromoth_id"]}
+    anchor_ts     = sorted_records[0]["timestamp"]
 
     for record in sorted_records[1:]:
-        delta = abs((record["timestamp"] - anchor_ts).total_seconds())
+        # abs() not needed — sorted guarantees record["timestamp"] >= anchor_ts
+        delta = (record["timestamp"] - anchor_ts).total_seconds()
+        hm_id = record["hydromoth_id"]
 
-        if delta <= STITCH_TOLERANCE_SEC:
-            # Within tolerance — belongs to the current session
+        if delta <= STITCH_TOLERANCE_SEC and hm_id not in current_ids:
+            # Within tolerance AND device not already in this session
             current_group.append(record)
+            current_ids.add(hm_id)
         else:
-            # Outside tolerance — close the current session, start a new one
+            # Outside tolerance OR duplicate device (e.g. HydroMoth crash/restart
+            # within the tolerance window) — close session, start a new one
             sessions.append(_make_session(current_group))
             current_group = [record]
-            anchor_ts = record["timestamp"]
+            current_ids   = {hm_id}
+            anchor_ts     = record["timestamp"]
 
     # Close the final group
     sessions.append(_make_session(current_group))
