@@ -81,11 +81,24 @@ def write_metadata(
         },
     }
 
-    stem = os.path.splitext(flac_path)[0]
+    stem      = os.path.splitext(flac_path)[0]
     meta_path = stem + "_meta.json"
+    temp_path = meta_path + ".tmp"
 
-    with open(meta_path, "w", encoding="utf-8") as f:
-        json.dump(meta, f, indent=2)
+    try:
+        # Write to a temp file first, then atomically rename.
+        # Protects against a half-written JSON if the Pi loses power mid-write.
+        with open(temp_path, "w", encoding="utf-8") as f:
+            json.dump(meta, f, indent=2)
+            f.flush()            # clear Python's write buffer
+            os.fsync(f.fileno()) # force OS to flush to SD card
+
+        os.replace(temp_path, meta_path)  # atomic on Linux
+
+    except Exception as e:
+        logger.error(f"Failed to write metadata for {flac_path}: {e}")
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
 
     logger.debug(f"Metadata written → {os.path.basename(meta_path)}")
     return meta_path
