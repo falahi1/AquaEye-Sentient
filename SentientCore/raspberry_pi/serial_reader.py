@@ -56,6 +56,21 @@ def get_latest_reading():
 
 
 # -----------------------------------------------------------------------------
+# Pre-compiled regex patterns
+# Compiled once at module load — avoids repeated cache lookups in the hot loop
+# -----------------------------------------------------------------------------
+_RE_TDS_V   = re.compile(r"TDS Voltage:\s*([\d.]+)\s*V")
+_RE_TDS_PPM = re.compile(r"TDS Value:\s*([\d.]+)\s*ppm")
+_RE_TURB_V  = re.compile(r"Turbidity Voltage:\s*([\d.]+)\s*V")
+_RE_LAT     = re.compile(r"Latitude:\s*([-\d.]+)")
+_RE_LON     = re.compile(r"Longitude:\s*([-\d.]+)")
+_RE_ALT     = re.compile(r"Altitude:\s*([\d.]+)\s*meters")
+_RE_DATE    = re.compile(r"Date:\s*(\S+)")
+_RE_TIME    = re.compile(r"Time\(UTC\):\s*(\S+)")
+_RE_HEADING = re.compile(r"Heading:\s*([\d.]+)\s*deg")
+
+
+# -----------------------------------------------------------------------------
 # Parsing
 # -----------------------------------------------------------------------------
 
@@ -70,47 +85,38 @@ def parse_serial_line(line):
       [Heading: 273.4 deg]   <- optional, only when IMU fitted
 
     Returns a dict with parsed fields, or None if the line is not a valid
-    data line (e.g. the startup message "AquaSound Sensor Hub Starting...").
+    data line (e.g. the startup message "AquaEye-Sentient Sensor Hub Starting...").
     """
     if "TDS Voltage" not in line:
         return None
 
     result = {}
 
-    # TDS voltage
-    m = re.search(r"TDS Voltage:\s*([\d.]+)\s*V", line)
+    m = _RE_TDS_V.search(line)
     result["tds_voltage"] = float(m.group(1)) if m else None
 
-    # TDS ppm
-    m = re.search(r"TDS Value:\s*([\d.]+)\s*ppm", line)
+    m = _RE_TDS_PPM.search(line)
     result["tds_ppm"] = float(m.group(1)) if m else None
 
-    # Turbidity voltage
-    m = re.search(r"Turbidity Voltage:\s*([\d.]+)\s*V", line)
+    m = _RE_TURB_V.search(line)
     result["turbidity_v"] = float(m.group(1)) if m else None
 
-    # GPS latitude
-    m = re.search(r"Latitude:\s*([-\d.]+)", line)
+    m = _RE_LAT.search(line)
     result["gps_lat"] = float(m.group(1)) if m else None
 
-    # GPS longitude
-    m = re.search(r"Longitude:\s*([-\d.]+)", line)
+    m = _RE_LON.search(line)
     result["gps_lon"] = float(m.group(1)) if m else None
 
-    # GPS altitude
-    m = re.search(r"Altitude:\s*([\d.]+)\s*meters", line)
+    m = _RE_ALT.search(line)
     result["gps_alt_m"] = float(m.group(1)) if m else None
 
-    # GPS date
-    m = re.search(r"Date:\s*(\S+)", line)
+    m = _RE_DATE.search(line)
     result["gps_date"] = m.group(1) if m else None
 
-    # GPS time UTC
-    m = re.search(r"Time\(UTC\):\s*(\S+)", line)
+    m = _RE_TIME.search(line)
     result["gps_time_utc"] = m.group(1) if m else None
 
-    # Heading (optional — only present when IMU is fitted to Arduino)
-    m = re.search(r"Heading:\s*([\d.]+)\s*deg", line)
+    m = _RE_HEADING.search(line)
     result["heading_deg"] = float(m.group(1)) if m else None
 
     result["raw_line"] = line
@@ -136,27 +142,28 @@ def _serial_loop():
             ser = serial.Serial(SERIAL_PORT, SERIAL_BAUD, timeout=2)
             logger.info("Arduino connected")
 
-            while True:
-                raw = ser.readline()
-                if not raw:
-                    continue  # timeout — no data, loop back
+            # Open log file once per connection — avoids open/close on every line
+            with open(SENSOR_LOG, "a") as log_file:
+                while True:
+                    raw = ser.readline()
+                    if not raw:
+                        continue  # timeout — no data, loop back
 
-                line = raw.decode("utf-8", errors="replace").strip()
-                if not line:
-                    continue
+                    line = raw.decode("utf-8", errors="replace").strip()
+                    if not line:
+                        continue
 
-                # Write raw line to sensor log (same behaviour as AquaSound)
-                try:
-                    with open(SENSOR_LOG, "a") as f:
-                        f.write(line + "\n")
-                except OSError as e:
-                    logger.warning(f"Could not write to sensor log: {e}")
+                    try:
+                        log_file.write(line + "\n")
+                        log_file.flush()  # flush Python buffer to OS on every line
+                    except OSError as e:
+                        logger.warning(f"Could not write to sensor log: {e}")
 
-                # Parse and update shared state
-                parsed = parse_serial_line(line)
-                if parsed:
-                    with _lock:
-                        _latest.update(parsed)
+                    # Parse and update shared state
+                    parsed = parse_serial_line(line)
+                    if parsed:
+                        with _lock:
+                            _latest.update(parsed)
 
         except serial.SerialException as e:
             logger.warning(f"Serial error: {e} — retrying in 5 s")
