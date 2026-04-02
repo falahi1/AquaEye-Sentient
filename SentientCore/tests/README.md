@@ -10,7 +10,6 @@ These files are **not deployed to the buoy** — they are for testing and valida
 | File | Purpose |
 |------|---------|
 | `pipeline_benchmark.py` | Runs the full pipeline repeatedly and measures timing |
-| `BENCHMARK_REPORT.md` | Results from the laptop pre-test (2026-04-01) |
 
 ---
 
@@ -130,8 +129,3 @@ before the power budget assumptions can be confirmed or revised.
 
 ---
 
-## Existing Reports
-
-| Report | Environment | WAV source | Cycles | Notes |
-|--------|-------------|------------|--------|-------|
-| `BENCHMARK_REPORT.md` | Windows laptop | Synthetic (silence) | 5 | Code verification only — timing not representative |
