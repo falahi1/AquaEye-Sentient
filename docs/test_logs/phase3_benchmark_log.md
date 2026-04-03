@@ -12,7 +12,8 @@
 
 **Command used:**
 ```
-cd SentientCore/raspberry_pi && python3 ../tests/pipeline_benchmark.py \
+cd SentientCore
+python3 tests/pipeline_benchmark.py \
   --wav_dir ~/aquaeye/bench_wav \
   --cycles 10 \
   --no_serial \
@@ -56,7 +57,8 @@ cd SentientCore/raspberry_pi && python3 ../tests/pipeline_benchmark.py \
 **HydroMoth recording details:** _____ Hz, _____ s per file
 **Command used:**
 ```
-cd SentientCore/raspberry_pi && python3 ../tests/pipeline_benchmark.py \
+cd SentientCore
+python3 tests/pipeline_benchmark.py \
   --wav_dir ~/aquaeye/bench_wav \
   --cycles 10 \
   --no_serial

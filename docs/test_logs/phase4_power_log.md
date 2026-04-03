@@ -78,7 +78,7 @@
 
 | State | D.2 Modelled (mA) | Measured mean (mA) | Error (%) |
 |-------|------------------|-------------------|-----------|
-| Pi active — FLAC encode |  |  |  |
+| Pi active — FLAC encode (peak) |  |  |  |
 | Pi active — SD card pull |  |  |  |
 | Pi active — Wi-Fi upload |  |  |  |
 | Pi RTC sleep |  |  |  |
