@@ -9,8 +9,13 @@ def normalise_frequency_response(
     """
     Normalise frequency response to 0 dB at the 1 kHz reference point.
     Returns list of normalised levels in same order as input.
-    Raises ValueError if 1000 Hz is not in freqs_hz.
+    Raises ValueError if lengths differ or if 1000 Hz is not in freqs_hz.
     """
+    if len(freqs_hz) != len(levels_dbfs):
+        raise ValueError(
+            f"freqs_hz and levels_dbfs must have the same length "
+            f"(got {len(freqs_hz)} and {len(levels_dbfs)})"
+        )
     if 1000 not in freqs_hz:
         raise ValueError("1 kHz reference (1000 Hz) must be present in freqs_hz")
     ref_level = levels_dbfs[freqs_hz.index(1000)]

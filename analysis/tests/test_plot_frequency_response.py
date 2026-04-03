@@ -29,15 +29,22 @@ def test_normalise_flat_response_returns_all_zeros():
 
 def test_normalise_raises_without_1khz():
     from acoustic.plot_frequency_response import normalise_frequency_response
+    raised = False
     try:
-        raised = False
-        try:
-            normalise_frequency_response([2000, 5000, 10000], [-30.0, -32.0, -35.0])
-        except ValueError:
-            raised = True
-        assert raised, "Expected ValueError when 1000 Hz not in freqs_hz"
-    except Exception as e:
-        assert False, f"Unexpected exception type: {e}"
+        normalise_frequency_response([2000, 5000, 10000], [-30.0, -32.0, -35.0])
+    except ValueError:
+        raised = True
+    assert raised, "Expected ValueError when 1000 Hz not in freqs_hz"
+
+
+def test_normalise_raises_on_length_mismatch():
+    from acoustic.plot_frequency_response import normalise_frequency_response
+    raised = False
+    try:
+        normalise_frequency_response([1000, 2000, 5000], [-30.0, -32.0])
+    except ValueError:
+        raised = True
+    assert raised, "Expected ValueError when freqs_hz and levels_dbfs have different lengths"
 
 
 def test_plot_creates_nonempty_png():
