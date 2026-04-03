@@ -52,3 +52,43 @@ def test_format_table_contains_expected_headers():
     assert 'Measured' in table
     assert 'Error' in table
     assert 'Pi active' in table
+
+
+def test_deployment_duration_raises_on_invalid_active_fraction():
+    from power_budget.validate_power import compute_deployment_duration_days
+    raised = False
+    try:
+        compute_deployment_duration_days(
+            active_mA=800.0, sleep_mA=10.0, arduino_mA=30.0,
+            active_fraction=70.0,   # wrong: minutes passed instead of fraction
+            battery_mAh=20000.0
+        )
+    except ValueError:
+        raised = True
+    assert raised, "Expected ValueError for active_fraction > 1"
+
+
+def test_deployment_duration_raises_on_zero_battery():
+    from power_budget.validate_power import compute_deployment_duration_days
+    raised = False
+    try:
+        compute_deployment_duration_days(
+            active_mA=800.0, sleep_mA=10.0, arduino_mA=30.0,
+            active_fraction=70.0 / 600.0, battery_mAh=0.0
+        )
+    except ValueError:
+        raised = True
+    assert raised, "Expected ValueError for zero battery capacity"
+
+
+def test_deployment_duration_raises_on_negative_current():
+    from power_budget.validate_power import compute_deployment_duration_days
+    raised = False
+    try:
+        compute_deployment_duration_days(
+            active_mA=-100.0, sleep_mA=10.0, arduino_mA=30.0,
+            active_fraction=70.0 / 600.0, battery_mAh=20000.0
+        )
+    except ValueError:
+        raised = True
+    assert raised, "Expected ValueError for negative current"
