@@ -66,3 +66,6 @@ desktop.ini
 .idea/
 *.swp
 *.swo
+
+# Analysis figures (generated at runtime)
+analysis/figures/
