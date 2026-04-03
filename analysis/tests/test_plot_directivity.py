@@ -68,3 +68,27 @@ def test_plot_directivity_creates_nonempty_png():
         plot_directivity(configs, path)
         assert os.path.exists(path)
         assert os.path.getsize(path) > 1024   # at least 1 KB
+
+
+def test_normalise_empty_dict_raises_value_error():
+    from acoustic.plot_directivity import normalise_directivity
+    try:
+        raised = False
+        try:
+            normalise_directivity({})
+        except ValueError:
+            raised = True
+        assert raised, "Expected ValueError for empty dict"
+    except Exception as e:
+        assert False, f"Unexpected exception: {e}"
+
+
+def test_plot_directivity_empty_configs_raises_value_error():
+    from acoustic.plot_directivity import plot_directivity
+    import tempfile, os
+    raised = False
+    try:
+        plot_directivity({}, '/tmp/should_not_exist.png')
+    except ValueError:
+        raised = True
+    assert raised, "Expected ValueError for empty configs"

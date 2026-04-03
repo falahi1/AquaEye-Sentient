@@ -8,6 +8,8 @@ def normalise_directivity(angle_to_level: Dict[float, float]) -> Dict[float, flo
     Normalise directivity data to 0 dB at the maximum level.
     Returns a new dict with levels shifted so the highest = 0 dB.
     """
+    if not angle_to_level:
+        raise ValueError("angle_to_level must not be empty")
     max_level = max(angle_to_level.values())
     return {angle: level - max_level for angle, level in angle_to_level.items()}
 
@@ -37,6 +39,8 @@ def plot_directivity(configs: Dict[str, Dict[float, float]], output_path: str) -
     Normalises each configuration independently before plotting.
     Saves PNG to output_path.
     """
+    if not configs:
+        raise ValueError("configs must not be empty")
     fig, ax = plt.subplots(subplot_kw={'projection': 'polar'}, figsize=(8, 8))
 
     for label, data in configs.items():
