@@ -83,11 +83,12 @@ def test_segment_beyond_file_length_raises():
     t = np.linspace(0, 1, 44100, endpoint=False)
     signal = np.sin(2 * np.pi * 440 * t)
     path = _write_wav(signal)
+    raised = False
     try:
         try:
             compute_rms_segment_dbfs(path, 0.0, 5.0)  # file is only 1 s
-            assert False, "Expected ValueError"
         except ValueError:
-            pass
+            raised = True
+        assert raised, "Expected ValueError to be raised for out-of-bounds segment"
     finally:
         os.unlink(path)
