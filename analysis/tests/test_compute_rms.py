@@ -2,7 +2,6 @@ import numpy as np
 import soundfile as sf
 import tempfile
 import os
-import math
 
 
 def _write_wav(data: np.ndarray, samplerate: int = 44100) -> str:
@@ -77,3 +76,18 @@ def test_stereo_wav_is_averaged_to_mono():
     finally:
         os.unlink(path_mono)
         os.unlink(path_stereo)
+
+
+def test_segment_beyond_file_length_raises():
+    from acoustic.compute_rms import compute_rms_segment_dbfs
+    t = np.linspace(0, 1, 44100, endpoint=False)
+    signal = np.sin(2 * np.pi * 440 * t)
+    path = _write_wav(signal)
+    try:
+        try:
+            compute_rms_segment_dbfs(path, 0.0, 5.0)  # file is only 1 s
+            assert False, "Expected ValueError"
+        except ValueError:
+            pass
+    finally:
+        os.unlink(path)

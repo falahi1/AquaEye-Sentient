@@ -27,6 +27,11 @@ def compute_rms_segment_dbfs(wav_path: str, start_s: float, duration_s: float) -
         data = data.mean(axis=1)
     start = int(start_s * samplerate)
     end = int((start_s + duration_s) * samplerate)
+    if end > len(data):
+        raise ValueError(
+            f"Requested segment [{start_s}s, {start_s + duration_s}s] "
+            f"exceeds file length ({len(data) / samplerate:.3f}s)."
+        )
     segment = data[start:end]
     rms = np.sqrt(np.mean(segment ** 2))
     if rms == 0.0:
