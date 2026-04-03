@@ -21,6 +21,23 @@ cd SentientCore/raspberry_pi && python3 ../tests/pipeline_benchmark.py \
 
 **Date run:** _____
 
+**Per-cycle raw data:**
+
+| Cycle | FLAC encode (s) | Stitch (s) | Metadata write (s) | Total active (s) |
+|-------|-----------------|------------|-------------------|-----------------|
+| 1     |                 |            |                   |                 |
+| 2     |                 |            |                   |                 |
+| 3     |                 |            |                   |                 |
+| 4     |                 |            |                   |                 |
+| 5     |                 |            |                   |                 |
+| 6     |                 |            |                   |                 |
+| 7     |                 |            |                   |                 |
+| 8     |                 |            |                   |                 |
+| 9     |                 |            |                   |                 |
+| 10    |                 |            |                   |                 |
+
+**Aggregate statistics:**
+
 | Metric | Mean (s) | SD (s) | Min (s) | Max (s) |
 |--------|----------|--------|---------|---------|
 | Total active window |  |  |  |  |
@@ -47,6 +64,23 @@ cd SentientCore/raspberry_pi && python3 ../tests/pipeline_benchmark.py \
 
 **Date run:** _____
 
+**Per-cycle raw data:**
+
+| Cycle | FLAC encode (s) | Stitch (s) | Metadata write (s) | Total active (s) |
+|-------|-----------------|------------|-------------------|-----------------|
+| 1     |                 |            |                   |                 |
+| 2     |                 |            |                   |                 |
+| 3     |                 |            |                   |                 |
+| 4     |                 |            |                   |                 |
+| 5     |                 |            |                   |                 |
+| 6     |                 |            |                   |                 |
+| 7     |                 |            |                   |                 |
+| 8     |                 |            |                   |                 |
+| 9     |                 |            |                   |                 |
+| 10    |                 |            |                   |                 |
+
+**Aggregate statistics:**
+
 | Metric | Mean (s) | SD (s) | Min (s) | Max (s) |
 |--------|----------|--------|---------|---------|
 | Total active window |  |  |  |  |
@@ -60,7 +94,7 @@ cd SentientCore/raspberry_pi && python3 ../tests/pipeline_benchmark.py \
 
 ---
 
-## D.2 Assumption Comparison
+## Timing Assumption Comparison
 
 | Assumption | Budgeted | Synthetic result | Real WAV result | Final status |
 |-----------|----------|-----------------|----------------|-------------|
