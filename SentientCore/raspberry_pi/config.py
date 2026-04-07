@@ -121,7 +121,7 @@ SERIAL_BAUD = 9600
 # CREDENTIALS_FILE: OAuth2 client secrets downloaded from Google Cloud Console.
 # TOKEN_FILE: cached OAuth2 token (created automatically on first run).
 
-GOOGLE_DRIVE_FOLDER_ID = "11QAYDOyePI-2t7yBnwD4fmWrq0ojsDI7"
+GOOGLE_DRIVE_FOLDER_ID = ""   # disabled for power test — no credentials on Pi
 CREDENTIALS_FILE       = os.path.join(BASE_DIR, "credentials.json")
 TOKEN_FILE             = os.path.join(BASE_DIR, "token.json")
 
