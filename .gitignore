@@ -48,8 +48,10 @@ token.json
 
 # Data files (recordings, test data — too large for git)
 *.wav
+*.WAV
 *.flac
 *.mp3
+tools/test_audio/
 
 # SQLite databases
 *.db
