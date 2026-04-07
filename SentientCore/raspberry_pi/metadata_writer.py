@@ -75,6 +75,7 @@ def write_metadata(
             "tds_ppm":       s.get("tds_ppm"),
             "tds_voltage":   s.get("tds_voltage"),
             "turbidity_v":   s.get("turbidity_v"),
+            "temp_c":        s.get("temp_c"),
         },
         "orientation": {
             "heading_deg": s.get("heading_deg"),   # null until IMU fitted

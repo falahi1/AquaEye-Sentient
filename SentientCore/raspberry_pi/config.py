@@ -81,13 +81,36 @@ PROCESSED_LOG   = os.path.join(BASE_DIR, "processed_files.log")
 SENSOR_LOG      = os.path.join(BASE_DIR, "arduino_readings.txt")
 
 # -----------------------------------------------------------------------------
+# USB HUB POWER CONTROL
+# -----------------------------------------------------------------------------
+# The Pi cuts and restores power to the USB port the HydroMoth hub is plugged
+# into using uhubctl — no relay or extra hardware needed.
+#
+# HOW TO FIND YOUR VALUES:
+#   sudo apt install uhubctl
+#   uhubctl                  # lists all hubs and ports
+#
+# Look for the port where your hub is connected. Example output:
+#   Current status for hub 1-1 [VIA Labs 2.0 hub, USB 2.0, 4 ports]
+#     Port 1: 0503 power highspeed enable connect   ← hub plugged in here
+#
+# → set HUB_LOCATION = "1-1", HUB_PORT = 1
+#
+# HUB_MOUNT_TIMEOUT_SEC: seconds to wait for all three SD cards to auto-mount
+# after the hub powers on. 20 s is generous; typically takes 3–8 s.
+
+HUB_LOCATION          = "1-1"  # update after running: uhubctl
+HUB_PORT              = 1      # update after running: uhubctl
+HUB_MOUNT_TIMEOUT_SEC = 20
+
+# -----------------------------------------------------------------------------
 # ARDUINO / SERIAL
 # -----------------------------------------------------------------------------
 # Must match the baud rate set in sensor_hub.ino (9600 by default).
 # Port is typically /dev/ttyACM0 on Pi when Arduino is connected over USB.
 # Change to /dev/ttyUSB0 if using a USB-to-serial adapter instead.
 
-SERIAL_PORT = "/dev/ttyACM0"
+SERIAL_PORT = "/dev/ttyUSB0"
 SERIAL_BAUD = 9600
 
 # -----------------------------------------------------------------------------

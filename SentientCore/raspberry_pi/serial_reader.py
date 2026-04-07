@@ -1,20 +1,38 @@
 # =============================================================================
 # AquaEye-Sentient — serial_reader.py
 # =============================================================================
-# Reads sensor data from the Arduino (sensor_hub.ino) over UART in a
+# Reads sensor data from the Arduino (custom sketch) over UART in a
 # background daemon thread. Parses each line into structured fields and
 # makes the latest reading available thread-safely to other modules.
 #
-# Inherited from: AquaSound (2024-25) had no serial_reader.py. The serial
-# logic was a single bare function (read_serial) inside main_recording.py
-# that only dumped raw lines to a .txt file with no parsing and no way for
-# other modules to access the data. This module replaces that approach.
+# ARDUINO SKETCH OUTPUT FORMAT
+# ----------------------------
+# Two line types are produced by the Arduino:
 #
-# Why this is needed:
-#   metadata_writer.py needs structured sensor values (GPS, TDS, turbidity)
-#   at the moment each audio file is processed — not a growing text file to
-#   parse later. This module keeps the latest reading in memory, thread-safe,
-#   so any module can call get_latest_reading() at any point.
+#   1. NMEA GPS sentences (raw pass-through from GPS module):
+#        $GPGGA,123519,4807.038,N,01131.000,E,1,08,0.9,545.4,M,...
+#        $GPRMC,123519,A,4807.038,N,01131.000,E,022.4,084.4,230394,...
+#        $GPGLL, $GPGSV, etc. (ignored)
+#      Also handles GN-prefix variants ($GNGGA, $GNRMC) from combined
+#      GPS/GLONASS modules.
+#
+#   2. Sensor readings (every 2 seconds):
+#        [SENSOR] Temp: 22.50 C | Turbidity: 2.10 V | TDS: 1.30 V
+#        [SENSOR] Temp: ERROR (Check Resistor/Wiring) | Turbidity: ... | TDS: ...
+#
+# All other lines (startup message, blank lines) are logged raw and ignored.
+#
+# TDS PPM CONVERSION
+# ------------------
+# The Arduino sketch outputs raw TDS voltage only. PPM is calculated here
+# using the same formula as sensor_hub.ino (assumed 25°C — will be replaced
+# with DS18B20 temp once cross-module sharing is implemented):
+#   tds_ppm = (133.42*v^3 - 255.86*v^2 + 857.39*v) * 0.5
+#
+# GPS COORDINATE CONVERSION
+# -------------------------
+# NMEA encodes coordinates as DDMM.MMMM — converted to decimal degrees:
+#   decimal = DD + MM.MMMM / 60
 # =============================================================================
 
 import threading
@@ -35,6 +53,7 @@ _latest = {
     "tds_voltage":   None,
     "tds_ppm":       None,
     "turbidity_v":   None,
+    "temp_c":        None,
     "gps_lat":       None,
     "gps_lon":       None,
     "gps_alt_m":     None,
@@ -57,70 +76,150 @@ def get_latest_reading():
 
 # -----------------------------------------------------------------------------
 # Pre-compiled regex patterns
-# Compiled once at module load — avoids repeated cache lookups in the hot loop
 # -----------------------------------------------------------------------------
-_RE_TDS_V   = re.compile(r"TDS Voltage:\s*([\d.]+)\s*V")
-_RE_TDS_PPM = re.compile(r"TDS Value:\s*([\d.]+)\s*ppm")
-_RE_TURB_V  = re.compile(r"Turbidity Voltage:\s*([\d.]+)\s*V")
-_RE_LAT     = re.compile(r"Latitude:\s*([-\d.]+)")
-_RE_LON     = re.compile(r"Longitude:\s*([-\d.]+)")
-_RE_ALT     = re.compile(r"Altitude:\s*([\d.]+)\s*meters")
-_RE_DATE    = re.compile(r"Date:\s*(\S+)")
-_RE_TIME    = re.compile(r"Time\(UTC\):\s*(\S+)")
-_RE_HEADING = re.compile(r"Heading:\s*([\d.]+)\s*deg")
+_RE_SENSOR = re.compile(
+    r"\[SENSOR\]\s+Temp:\s+(?P<temp>[\d.]+|ERROR[^|]*)"
+    r"\s*\|\s*Turbidity:\s+(?P<turb>[\d.]+)\s*V"
+    r"\s*\|\s*TDS:\s+(?P<tds>[\d.]+)\s*V",
+    re.IGNORECASE,
+)
+
+# NMEA sentence types we care about (GP and GN prefixes)
+_RE_GGA = re.compile(r"^\$(GP|GN)GGA,")
+_RE_RMC = re.compile(r"^\$(GP|GN)RMC,")
 
 
 # -----------------------------------------------------------------------------
-# Parsing
+# TDS voltage → ppm conversion
+# Same formula as sensor_hub.ino (temperature-compensated at 25°C)
 # -----------------------------------------------------------------------------
+def _tds_voltage_to_ppm(voltage: float) -> float:
+    compensation = 1.0 + 0.02 * (25.0 - 25.0)   # = 1.0 at 25°C
+    cv = voltage / compensation
+    return (133.42 * cv**3 - 255.86 * cv**2 + 857.39 * cv) * 0.5
 
-def parse_serial_line(line):
-    """
-    Parse one line from sensor_hub.ino into a structured dict.
 
-    Expected format from Arduino (single line, all on one row):
-      TDS Voltage: 2.34 V TDS Value: 456.78 ppm Turbidity Voltage: 1.23 V
-      Latitude: 37.123456, Longitude: 26.654321, Altitude: 5 meters
-      Date: 3/25/25 Time(UTC): 12:30:45
-      [Heading: 273.4 deg]   <- optional, only when IMU fitted
-
-    Returns a dict with parsed fields, or None if the line is not a valid
-    data line (e.g. the startup message "AquaEye-Sentient Sensor Hub Starting...").
-    """
-    if "TDS Voltage" not in line:
+# -----------------------------------------------------------------------------
+# NMEA coordinate conversion: DDMM.MMMM → decimal degrees
+# -----------------------------------------------------------------------------
+def _nmea_to_decimal(value: str, direction: str) -> float | None:
+    """Convert NMEA DDMM.MMMM + N/S/E/W to signed decimal degrees."""
+    try:
+        value = value.strip()
+        if not value:
+            return None
+        dot = value.index(".")
+        degrees = float(value[:dot - 2])
+        minutes = float(value[dot - 2:])
+        decimal = degrees + minutes / 60.0
+        if direction.upper() in ("S", "W"):
+            decimal = -decimal
+        return round(decimal, 6)
+    except (ValueError, IndexError):
         return None
 
-    result = {}
 
-    m = _RE_TDS_V.search(line)
-    result["tds_voltage"] = float(m.group(1)) if m else None
+# -----------------------------------------------------------------------------
+# Parse a $GPGGA / $GNGGA sentence → lat, lon, alt
+# Format: $GPGGA,HHMMSS.ss,DDMM.MMMM,N,DDDMM.MMMM,E,Q,...,ALT,M,...
+# -----------------------------------------------------------------------------
+def _parse_gga(line: str) -> dict | None:
+    parts = line.split(",")
+    if len(parts) < 10:
+        return None
+    fix_quality = parts[6].strip()
+    if fix_quality == "0" or fix_quality == "":
+        return None   # no fix — indoors GPS will hit this
+    lat = _nmea_to_decimal(parts[2], parts[3])
+    lon = _nmea_to_decimal(parts[4], parts[5])
+    try:
+        alt = float(parts[9]) if parts[9].strip() else None
+    except ValueError:
+        alt = None
+    if lat is None or lon is None:
+        return None
+    return {"gps_lat": lat, "gps_lon": lon, "gps_alt_m": alt}
 
-    m = _RE_TDS_PPM.search(line)
-    result["tds_ppm"] = float(m.group(1)) if m else None
 
-    m = _RE_TURB_V.search(line)
-    result["turbidity_v"] = float(m.group(1)) if m else None
+# -----------------------------------------------------------------------------
+# Parse a $GPRMC / $GNRMC sentence → date, time
+# Format: $GPRMC,HHMMSS.ss,A,DDMM,N,DDDMM,E,...,DDMMYY,...
+# -----------------------------------------------------------------------------
+def _parse_rmc(line: str) -> dict | None:
+    parts = line.split(",")
+    if len(parts) < 10:
+        return None
+    status = parts[2].strip()
+    if status != "A":
+        return None   # void — no valid fix
+    time_raw = parts[1].strip()
+    date_raw = parts[9].strip()
+    try:
+        time_utc = f"{time_raw[:2]}:{time_raw[2:4]}:{time_raw[4:6]}"
+        date_str = f"{date_raw[2:4]}/{date_raw[:2]}/{date_raw[4:6]}"
+    except IndexError:
+        return None
+    return {"gps_date": date_str, "gps_time_utc": time_utc}
 
-    m = _RE_LAT.search(line)
-    result["gps_lat"] = float(m.group(1)) if m else None
 
-    m = _RE_LON.search(line)
-    result["gps_lon"] = float(m.group(1)) if m else None
+# -----------------------------------------------------------------------------
+# Parse one line from the Arduino
+# -----------------------------------------------------------------------------
+def parse_serial_line(line: str) -> dict | None:
+    """
+    Parse one line from the Arduino sketch into a structured dict.
 
-    m = _RE_ALT.search(line)
-    result["gps_alt_m"] = float(m.group(1)) if m else None
+    Returns a partial dict of fields parsed from this line, or None if the
+    line contains no recognisable data (startup message, blank line, etc.).
+    Fields not present in this line are not included in the returned dict —
+    callers should update shared state with dict.update(), not replace it.
+    """
+    # --- [SENSOR] line ---
+    m = _RE_SENSOR.search(line)
+    if m:
+        result = {}
 
-    m = _RE_DATE.search(line)
-    result["gps_date"] = m.group(1) if m else None
+        temp_str = m.group("temp").strip()
+        if temp_str.upper().startswith("ERROR"):
+            result["temp_c"] = None
+        else:
+            try:
+                result["temp_c"] = float(temp_str)
+            except ValueError:
+                result["temp_c"] = None
 
-    m = _RE_TIME.search(line)
-    result["gps_time_utc"] = m.group(1) if m else None
+        try:
+            turb_v = float(m.group("turb"))
+            result["turbidity_v"] = turb_v
+        except ValueError:
+            result["turbidity_v"] = None
 
-    m = _RE_HEADING.search(line)
-    result["heading_deg"] = float(m.group(1)) if m else None
+        try:
+            tds_v = float(m.group("tds"))
+            result["tds_voltage"] = tds_v
+            result["tds_ppm"] = round(_tds_voltage_to_ppm(tds_v), 2)
+        except ValueError:
+            result["tds_voltage"] = None
+            result["tds_ppm"] = None
 
-    result["raw_line"] = line
-    return result
+        result["raw_line"] = line
+        return result
+
+    # --- GGA sentence (lat/lon/alt) ---
+    if _RE_GGA.match(line):
+        parsed = _parse_gga(line)
+        if parsed:
+            parsed["raw_line"] = line
+        return parsed   # may be None if no fix
+
+    # --- RMC sentence (date/time) ---
+    if _RE_RMC.match(line):
+        parsed = _parse_rmc(line)
+        if parsed:
+            parsed["raw_line"] = line
+        return parsed   # may be None if void
+
+    return None
 
 
 # -----------------------------------------------------------------------------
@@ -142,12 +241,11 @@ def _serial_loop():
             ser = serial.Serial(SERIAL_PORT, SERIAL_BAUD, timeout=2)
             logger.info("Arduino connected")
 
-            # Open log file once per connection — avoids open/close on every line
             with open(SENSOR_LOG, "a") as log_file:
                 while True:
                     raw = ser.readline()
                     if not raw:
-                        continue  # timeout — no data, loop back
+                        continue
 
                     line = raw.decode("utf-8", errors="replace").strip()
                     if not line:
@@ -155,11 +253,10 @@ def _serial_loop():
 
                     try:
                         log_file.write(line + "\n")
-                        log_file.flush()  # flush Python buffer to OS on every line
+                        log_file.flush()
                     except OSError as e:
                         logger.warning(f"Could not write to sensor log: {e}")
 
-                    # Parse and update shared state
                     parsed = parse_serial_line(line)
                     if parsed:
                         with _lock:
