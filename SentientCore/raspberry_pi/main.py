@@ -52,6 +52,7 @@ from datetime import datetime
 sys.path.insert(0, os.path.dirname(__file__))
 
 import audio_processor
+import hub_controller
 import hydromoth_puller
 import metadata_writer
 import serial_reader
@@ -59,6 +60,7 @@ import session_stitcher
 from config import (
     BASE_DIR, STAGING_FOLDER, FLAC_FOLDER, UPLOADED_FOLDER,
     PROCESSED_LOG, SENSOR_LOG, SAMPLE_RATE, POLL_INTERVAL_SEC,
+    HUB_LOCATION, HUB_PORT, HUB_MOUNT_TIMEOUT_SEC, HYDROMOTHS,
 )
 
 # ---------------------------------------------------------------------------
@@ -122,7 +124,7 @@ def _rtc_halt(interval_sec: int):
     Uses: sudo rtcwake -m halt -s <seconds>
 
     RTC halt mode: Pi halts after each cycle and the RTC wakes it for the
-    next one. The halt state draws ~20 mA vs ~600-900 mA active.
+    next one. The halt state draws ~30 mA vs ~900-1200 mA active (Pi 5).
 
     Requires: the script must be run with sudo, or the user must have
     passwordless sudo for rtcwake configured in /etc/sudoers.
@@ -169,7 +171,32 @@ def run_cycle(cycle_num: int) -> dict:
 
     # ------------------------------------------------------------------
     # Step 1: Pull from SD cards
+    # Hub powers on → SD cards mount → pull → unmount → hub powers off
+    # HydroMoths pause recording while USB is connected; they resume
+    # automatically once the hub powers off.
     # ------------------------------------------------------------------
+    mount_paths = [hm["sd_mount"] for hm in HYDROMOTHS]
+
+    try:
+        logger.info("Hub: powering on USB hub ...")
+        hub_result = hub_controller.power_on(
+            location=HUB_LOCATION,
+            port=HUB_PORT,
+            mount_paths=mount_paths,
+            timeout_sec=HUB_MOUNT_TIMEOUT_SEC,
+        )
+        logger.info(
+            f"Hub: {len(hub_result['mounted'])}/3 SD cards mounted in "
+            f"{hub_result['elapsed']} s"
+        )
+        if hub_result["missing"]:
+            logger.warning(f"Hub: missing SD cards: {hub_result['missing']}")
+    except Exception as e:
+        msg = f"Hub power-on failed: {e}"
+        logger.error(msg)
+        summary["errors"].append(msg)
+        return summary
+
     try:
         pull_result = hydromoth_puller.pull_all()
         summary["pulled"] = pull_result["pulled"]
@@ -188,7 +215,19 @@ def run_cycle(cycle_num: int) -> dict:
         msg = f"Pull step failed unexpectedly: {e}"
         logger.error(msg)
         summary["errors"].append(msg)
-        # Cannot continue without files — return early
+    finally:
+        # Always power off the hub — even if the pull crashed — so
+        # HydroMoths can resume recording.
+        logger.info("Hub: powering off USB hub ...")
+        hub_controller.power_off(
+            location=HUB_LOCATION,
+            port=HUB_PORT,
+            mount_paths=mount_paths,
+        )
+        logger.info("Hub: off. HydroMoths resuming recording.")
+
+    if not summary["pulled"] and summary["errors"]:
+        # Pull completely failed — no point processing zero files
         return summary
 
     # ------------------------------------------------------------------
@@ -209,7 +248,7 @@ def run_cycle(cycle_num: int) -> dict:
         return summary
 
     # ------------------------------------------------------------------
-    # Step 3 + 4: Encode + Metadata (per session, per file)
+    # Step 3 + 4: Mix + Metadata (one FLAC per session)
     # ------------------------------------------------------------------
     sensor_data = serial_reader.get_latest_reading()
 
@@ -219,57 +258,57 @@ def run_cycle(cycle_num: int) -> dict:
         if not session["complete"]:
             logger.warning(
                 f"Session {session_id} is partial "
-                f"({session['n_units']}/{len(session['files'])} units) — processing anyway"
+                f"({session['n_units']}/{len(HYDROMOTHS)} units) — mixing available units"
             )
 
-        for file_entry in session["files"]:
-            wav_path     = file_entry["wav_path"]
-            hydromoth_id = file_entry["hydromoth_id"]
-            wav_name     = os.path.basename(wav_path)
+        wav_paths = [f["wav_path"] for f in session["files"]]
+        flac_path = os.path.join(FLAC_FOLDER, f"MIXED__{session_id}.flac")
 
-            # Build output FLAC path
-            stem      = os.path.splitext(wav_name)[0]
-            flac_path = os.path.join(FLAC_FOLDER, f"{stem}.flac")
+        # Mix all units into one FLAC
+        enc = audio_processor.mix_session_to_flac(wav_paths, flac_path)
 
-            # Encode
-            enc = audio_processor.convert_wav_to_flac(wav_path, flac_path)
+        if not enc["success"]:
+            msg = f"Mix failed for session {session_id}: {enc['error']}"
+            logger.error(msg)
+            summary["errors"].append(msg)
+            summary["encode_errors"] += 1
+            continue
 
-            if not enc["success"]:
-                msg = f"Encode failed for {wav_name}: {enc['error']}"
-                logger.error(msg)
-                summary["errors"].append(msg)
-                summary["encode_errors"] += 1
-                continue
+        logger.info(
+            f"Mixed session {session_id} → {os.path.basename(flac_path)} "
+            f"({len(wav_paths)} units, {enc['flac_bytes'] // 1024} KB, "
+            f"{enc['encode_sec']:.1f} s)"
+        )
 
-            logger.info(
-                f"Encoded {wav_name} → {os.path.basename(flac_path)} "
-                f"({enc['wav_bytes'] // 1024} KB → {enc['flac_bytes'] // 1024} KB, "
-                f"{enc['encode_sec']:.1f} s)"
+        # Metadata
+        units = [
+            {
+                "hydromoth_id": f["hydromoth_id"],
+                "angle_deg":    f["angle_deg"],
+                "channel":      f["channel"],
+            }
+            for f in session["files"]
+        ]
+        try:
+            metadata_writer.write_mixed_metadata(
+                flac_path   = flac_path,
+                units       = units,
+                sample_rate = SAMPLE_RATE,
+                session_id  = session_id,
+                sensor      = sensor_data,
             )
+        except Exception as e:
+            logger.warning(f"Metadata write failed for session {session_id}: {e}")
 
-            # Metadata
-            try:
-                metadata_writer.write_metadata(
-                    flac_path    = flac_path,
-                    hydromoth_id = hydromoth_id,
-                    angle_deg    = file_entry["angle_deg"],
-                    channel      = file_entry["channel"],
-                    sample_rate  = SAMPLE_RATE,
-                    session_id   = session_id,
-                    sensor       = sensor_data,
-                )
-            except Exception as e:
-                logger.warning(f"Metadata write failed for {wav_name}: {e}")
-                # Not fatal — FLAC is still good
-
-            # Mark as processed
-            try:
-                with open(PROCESSED_LOG, "a", encoding="utf-8") as f:
+        # Mark all contributing WAVs as processed
+        try:
+            with open(PROCESSED_LOG, "a", encoding="utf-8") as f:
+                for wav_path in wav_paths:
                     f.write(wav_path + "\n")
-            except OSError as e:
-                logger.warning(f"Could not update processed log: {e}")
+        except OSError as e:
+            logger.warning(f"Could not update processed log: {e}")
 
-            summary["encoded"] += 1
+        summary["encoded"] += 1
 
     # ------------------------------------------------------------------
     # Step 5: Upload (stub)
