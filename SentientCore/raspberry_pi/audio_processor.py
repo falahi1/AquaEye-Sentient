@@ -136,6 +136,15 @@ def mix_session_to_flac(wav_paths: list, flac_path: str,
         "error":        None,
     }
 
+    # Guard: empty list
+    if len(wav_paths) == 0:
+        result["error"] = "wav_paths is empty"
+        return result
+
+    # TODO: Single-file fallback to convert_wav_to_flac requires flac CLI (Linux/Pi only).
+    # Docstring says fallback is implemented but deferring to production on Pi environment.
+    # Temporarily, mix_session_to_flac handles all cases (single or multiple files) via soundfile.
+
     try:
         # --- Load all channels -----------------------------------------------
         arrays = []
