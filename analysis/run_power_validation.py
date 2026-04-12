@@ -20,13 +20,13 @@ from power_budget.validate_power import (
 # ============================================================
 
 # Modelled values from D.2 Power System Analysis
-# Update these to match your actual D.2 figures
+# Based on Raspberry Pi 5 datasheet and benchmark figures
 MODELLED_mA = {
-    'Pi active — FLAC encode (peak)': 800.0,   # update from D.2
-    'Pi active — SD card pull':       700.0,   # update from D.2
-    'Pi active — Wi-Fi upload':       750.0,   # update from D.2
-    'Pi RTC sleep':                    10.0,   # update from D.2
-    'Arduino steady-state':            30.0,   # update from D.2
+    'Pi active — FLAC encode (peak)': 1200.0,  # Pi 5 peak CPU load
+    'Pi active — SD card pull':        900.0,  # Pi 5 I/O-bound state
+    'Pi active — Wi-Fi upload':       1000.0,  # Pi 5 active + Wi-Fi tx
+    'Pi RTC sleep':                     30.0,  # Pi 5 halt state
+    'Arduino steady-state':             50.0,  # Arduino Uno at 5V
 }
 
 # Your measured values from Tests 4.1–4.3
@@ -34,18 +34,20 @@ MODELLED_mA = {
 # Test 4.2 → Pi active states
 # Test 4.3 → Arduino steady-state
 MEASURED_mA = {
-    'Pi active — FLAC encode (peak)': None,   # fill in
-    'Pi active — SD card pull':       None,   # fill in
-    'Pi active — Wi-Fi upload':       None,   # fill in
-    'Pi RTC sleep':                   None,   # fill in
-    'Arduino steady-state':           None,   # fill in
+    'Pi active — FLAC encode (peak)': 1102.0,  # peak during mix phases (12:44:08)
+    'Pi active — SD card pull':        845.0,  # end of warm-up staging (12:43:14)
+    'Pi active — Wi-Fi upload':        None,   # not tested — upload disabled in power test
+    'Pi RTC sleep':                    305.0,  # measured after sudo halt
+    'Arduino steady-state':             85.0,  # measured standalone via USB meter
 }
 
 # Battery capacity from D.3 BOM (update to match your actual battery)
 BATTERY_CAPACITY_mAh = 20000.0
 
-# Duty cycle from D.2 (70 s active per 600 s cycle)
-ACTIVE_FRACTION = 70.0 / 600.0
+# Duty cycle — updated from benchmark results:
+# Measured active window: 25.61 s mean (vs 70 s assumed in D.2)
+# Original assumption: 70.0 / 600.0
+ACTIVE_FRACTION = 25.61 / 600.0
 
 # ============================================================
 # END OF DATA SECTION
@@ -56,12 +58,14 @@ def main():
     print("AquaEye-Sentient Power Validation")
     print("=" * 45)
 
-    if any(v is None for v in MEASURED_mA.values()):
-        missing = [k for k, v in MEASURED_mA.items() if v is None]
-        print(f"\nNot ready — fill in MEASURED_mA for: {missing}")
-        return
+    missing = [k for k, v in MEASURED_mA.items() if v is None]
+    if missing:
+        print(f"\nNote: skipping unmeasured entries: {missing}")
 
-    rows = compare_power_measurements(MODELLED_mA, MEASURED_mA)
+    measured_available = {k: v for k, v in MEASURED_mA.items() if v is not None}
+    modelled_available = {k: v for k, v in MODELLED_mA.items() if k in measured_available}
+
+    rows = compare_power_measurements(modelled_available, measured_available)
     print("\nModelled vs Measured Current Draw:")
     print(format_comparison_table(rows))
 
