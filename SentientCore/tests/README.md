@@ -10,6 +10,8 @@ These files are **not deployed to the buoy** — they are for testing and valida
 | File | Purpose |
 |------|---------|
 | `pipeline_benchmark.py` | Runs the full pipeline repeatedly and measures timing |
+| `test_mixing.py` | Unit tests for `mix_session_to_flac` and `write_mixed_metadata` |
+| `conftest.py` | Adds `SentientCore/raspberry_pi/` to `sys.path` for pytest imports |
 
 ---
 
@@ -24,6 +26,26 @@ It simulates the pull step internally — no SD cards or HydroMoths are needed.
 
 **What it does NOT test:** `hydromoth_puller`, `serial_reader`, `cloud_uploader`,
 or `main.py`. Those require real hardware (SD cards, Arduino, Google credentials).
+
+## Unit Tests
+
+`test_mixing.py` covers the session mixing functions added in this cycle:
+
+| Test | What it checks |
+|------|---------------|
+| `test_mix_produces_single_flac` | 3 WAVs → 1 FLAC, success=True, file exists |
+| `test_mix_result_has_expected_keys` | Result dict has all 5 required keys |
+| `test_mix_output_duration_matches_input` | Output duration matches input (±0.1 s) |
+| `test_mix_single_file_falls_back_to_convert` | Single-file input still produces FLAC |
+| `test_mix_truncates_to_shortest_file` | Mismatched lengths → truncated to shortest |
+| `test_mix_normalises_output` | 3× loud identical signals → no clipping |
+| `test_write_mixed_metadata_creates_json` | Sidecar JSON file created |
+| `test_write_mixed_metadata_schema` | JSON contains correct schema (mix_type, units, etc.) |
+
+Run from project root:
+```bash
+pytest SentientCore/tests/test_mixing.py -v
+```
 
 ---
 
@@ -102,7 +124,7 @@ Run from the `SentientCore/` directory so the benchmark can find the pipeline mo
 
 The benchmark prints three tables after all cycles complete:
 
-**Per-cycle timing** — encode time, stitch time, metadata time, and total per cycle.
+**Per-cycle timing** — mix time, stitch time, metadata time, and total per cycle.
 
 **Aggregate statistics** — mean, standard deviation, min, and max across all cycles.
 
@@ -110,11 +132,22 @@ The benchmark prints three tables after all cycles complete:
 
 | Assumption | What it checks |
 |------------|---------------|
-| A3: encode time/file | Is per-file FLAC encode within the budgeted 8 s? |
+| A3: encode time/session | Is per-session FLAC mix within the budgeted 8 s? |
 | A3+A4: total active window | Is the full cycle within the budgeted 70 s? |
 | A1: active current | Read from your inline meter — not captured by the script |
 
 Status is **OK** if measured ≤ 125% of the budgeted value, **REVISE** if over.
+
+**Pi 5 benchmark results (2026-04-12, synthetic 10-min WAV files):**
+
+| Metric | Budgeted | Measured |
+|--------|----------|----------|
+| Mix time per session | 8 s | 4.77 s mean |
+| Total active window | 70 s | 25.61 s mean |
+| Stitch overhead | — | 0.00 s |
+| Metadata write | — | 2.26 s |
+
+See `docs/test_logs/phase4_power_log.md` for full power measurement results.
 
 ---
 

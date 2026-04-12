@@ -27,9 +27,10 @@ AquaEye-Sentient/
 │   │   ├── main.py                 ← Entry point — orchestrates the full pipeline
 │   │   ├── hydromoth_puller.py     ← Copies WAV files from HydroMoth SD cards
 │   │   ├── session_stitcher.py     ← Groups files from all 3 units by timestamp
-│   │   ├── audio_processor.py      ← WAV → FLAC compression
+│   │   ├── audio_processor.py      ← WAV → FLAC compression; multi-channel mix
 │   │   ├── metadata_writer.py      ← Writes _meta.json sidecar per recording
 │   │   ├── serial_reader.py        ← Reads Arduino sensor data over serial
+│   │   ├── hub_controller.py       ← USB hub power control via uhubctl
 │   │   ├── cloud_uploader.py       ← Uploads FLAC + metadata to Google Drive
 │   │   ├── config.py               ← All tunable parameters in one place
 │   │   └── README.md               ← Full pipeline documentation
@@ -38,11 +39,26 @@ AquaEye-Sentient/
 │   │       ├── sensor_hub.ino      ← Arduino sketch: TDS, turbidity, GPS
 │   │       └── README.md           ← Wiring, libraries, serial format
 │   ├── tests/
-│   │   ├── pipeline_benchmark.py   ← Performance benchmark suite
-│   │   ├── BENCHMARK_REPORT.md     ← Benchmark results
+│   │   ├── pipeline_benchmark.py   ← Performance and timing benchmark suite
+│   │   ├── test_mixing.py          ← Unit tests for session mixing functions
+│   │   ├── conftest.py             ← pytest path setup
 │   │   └── README.md
 │   ├── ARCHITECTURE.md             ← Design decisions and module responsibilities
 │   └── CHANGELOG.md                ← Version history
+│
+├── tools/
+│   ├── generate_test_audio.py      ← Generates synthetic HydroMoth WAV files for testing
+│   └── tests/
+│       └── test_generate_test_audio.py
+│
+├── analysis/
+│   ├── run_power_validation.py     ← Compares D.2 modelled vs measured power values
+│   └── power_budget/               ← Power budget calculation modules
+│
+├── docs/
+│   └── test_logs/
+│       ├── phase4_power_log.md     ← Power measurement results (2026-04-12)
+│       └── ...
 │
 ├── Inherited_Codes/                ← Unmodified code from previous cycles
 │   ├── AquaEye_2023-24_Andia/      ← ML classifiers (RFC, GBM, kNN) — 83% accuracy

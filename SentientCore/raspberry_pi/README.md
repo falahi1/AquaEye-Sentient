@@ -22,11 +22,12 @@ hydromoth_puller   — copies WAV files to staging, verifies, deletes from SD
         ▼
 session_stitcher   — groups files from all 3 units by timestamp into sessions
         │
+        ▼  (one session = HM_A + HM_B + HM_C simultaneous recordings)
+audio_processor    — sums all 3 WAVs per session into one normalised FLAC
+        │             (mix_session_to_flac: sum → normalise → encode)
+        │             output: MIXED__<session_id>.flac
         ▼
-audio_processor    — converts each WAV to FLAC (lossless)
-        │
-        ▼
-metadata_writer    — writes _meta.json sidecar alongside each FLAC
+metadata_writer    — writes _meta.json sidecar recording all 3 contributing units
         │
         ▼
 cloud_uploader     — uploads FLAC + sidecar pairs to Google Drive (if Wi-Fi)
@@ -34,6 +35,12 @@ cloud_uploader     — uploads FLAC + sidecar pairs to Google Drive (if Wi-Fi)
 
 `serial_reader` runs as a background thread throughout, continuously reading
 GPS, TDS, and turbidity data from the Arduino over UART.
+
+**Key design decision — session mixing:** Rather than storing three separate FLACs
+per session (one per hydrophone), the pipeline mixes all three channels into a single
+omnidirectional FLAC using sum-then-normalise. This provides 360° acoustic coverage
+regardless of buoy orientation, halves storage and upload requirements compared to
+storing all three separately, and simplifies the downstream ML inference step.
 
 ---
 
@@ -45,9 +52,10 @@ GPS, TDS, and turbidity data from the Arduino over UART.
 | `main.py` | Top-level orchestration — the script you run on the Pi |
 | `hydromoth_puller.py` | Pulls WAV files from each HydroMoth SD card to staging |
 | `session_stitcher.py` | Groups staged WAVs into time-synchronised sessions |
-| `audio_processor.py` | WAV → FLAC lossless compression |
-| `metadata_writer.py` | Writes `_meta.json` sidecar file alongside each FLAC |
+| `audio_processor.py` | WAV → FLAC compression; `mix_session_to_flac()` mixes 3 channels into one |
+| `metadata_writer.py` | Writes `_meta.json` sidecar; `write_mixed_metadata()` records all 3 units |
 | `serial_reader.py` | Reads Arduino sensor data (GPS, TDS, turbidity) over UART |
+| `hub_controller.py` | Controls USB hub power via uhubctl (power-cycles SD card readers) |
 | `cloud_uploader.py` | Uploads completed FLACs and sidecars to Google Drive |
 
 ---
@@ -87,7 +95,8 @@ SAMPLE_RATE = 96000   # Hz — change to 192000 or 384000 for echolocation
 
 **Arduino serial port:**
 ```python
-SERIAL_PORT = "/dev/ttyACM0"   # or /dev/ttyUSB0 depending on connection type
+SERIAL_PORT = "/dev/ttyUSB0"   # ch341-uart adapter — confirmed on Pi 5 with Arduino Nano
+# Use /dev/ttyACM0 if connecting Arduino via native USB (Uno, Mega)
 ```
 
 **Google Drive folder ID** — from the Drive folder URL:
@@ -118,58 +127,48 @@ copy `token.json` to the Pi.
 Runs cycles continuously. The Pi stays on. Press `Ctrl+C` to stop.
 
 ```bash
-python3 /home/pi/aquaeye/raspberry_pi/main.py
+python3 /home/alf0081/aquaeye/raspberry_pi/main.py
 ```
 
 ### Once mode — for field deployment on the buoy
 
-Runs one cycle, then halts the Pi. The RTC wakes it up for the next cycle.
-This is the low-power deployment mode.
+Runs one cycle, then halts the Pi. A relay/timer circuit (recommended) or
+`rtcwake` restores power for the next cycle.
 
 ```bash
-python3 /home/pi/aquaeye/raspberry_pi/main.py --once
+python3 /home/alf0081/aquaeye/raspberry_pi/main.py --once
 ```
 
-Requires `sudo` or passwordless sudo for `rtcwake` in `/etc/sudoers`:
+> **Power note (Pi 5):** `sudo halt` draws ~305 mA — far higher than the
+> ~30 mA expected. For long deployments, use a hardware relay or MOSFET
+> circuit (e.g. TPL5110 timer IC or DS3231 RTC + relay) to cut Pi power
+> entirely between cycles. See `docs/test_logs/phase4_power_log.md` for
+> the full power budget analysis and relay circuit recommendation.
+
+### Run on boot (crontab — confirmed working on Pi 5)
+
+Add to crontab with `crontab -e`:
+
 ```
-pi ALL=(ALL) NOPASSWD: /usr/sbin/rtcwake
-```
-
-### Run on boot (systemd)
-
-To start automatically on boot, create `/etc/systemd/system/aquaeye.service`:
-
-```ini
-[Unit]
-Description=AquaEye-Sentient Pipeline
-After=network.target
-
-[Service]
-ExecStart=python3 /home/pi/aquaeye/raspberry_pi/main.py --once
-User=pi
-Restart=on-failure
-
-[Install]
-WantedBy=multi-user.target
+@reboot sleep 60 && /home/alf0081/run_benchmark.sh
 ```
 
-Then enable:
-```bash
-sudo systemctl enable aquaeye.service
-sudo systemctl start aquaeye.service
+Or for the main pipeline:
+```
+@reboot sleep 30 && python3 /home/alf0081/aquaeye/raspberry_pi/main.py --once >> /home/alf0081/aquaeye/aquaeye.log 2>&1
 ```
 
 ---
 
 ## Logs
 
-All activity is logged to `/home/pi/aquaeye/aquaeye.log` and also printed to the terminal.
+All activity is logged to `/home/alf0081/aquaeye/aquaeye.log` and also printed to the terminal.
 
 ```bash
-tail -f /home/pi/aquaeye/aquaeye.log   # live log output
+tail -f /home/alf0081/aquaeye/aquaeye.log   # live log output
 ```
 
-Arduino sensor readings are also written to `/home/pi/aquaeye/arduino_readings.txt`.
+Arduino sensor readings are also written to `/home/alf0081/aquaeye/arduino_readings.txt`.
 
 ---
 
