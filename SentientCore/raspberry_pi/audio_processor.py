@@ -131,6 +131,7 @@ def mix_session_to_flac(wav_paths: list, flac_path: str,
     result = {
         "success":      False,
         "duration_sec": None,
+        "wav_bytes":    None,
         "flac_bytes":   None,
         "encode_sec":   None,
         "error":        None,
@@ -153,6 +154,11 @@ def mix_session_to_flac(wav_paths: list, flac_path: str,
             data, sr = sf.read(p, dtype="float64", always_2d=False)
             if sample_rate is None:
                 sample_rate = sr
+            elif sr != sample_rate:
+                logger.warning(
+                    f"Sample rate mismatch: expected {sample_rate} Hz, "
+                    f"got {sr} Hz for {os.path.basename(p)} — mixing may be incorrect"
+                )
             arrays.append(data)
 
         # --- Truncate to shortest length -------------------------------------
@@ -168,7 +174,7 @@ def mix_session_to_flac(wav_paths: list, flac_path: str,
         result["duration_sec"] = min_len / sample_rate
 
         # --- Encode to FLAC via soundfile (libsndfile — no CLI required) -----
-        mixed_i16 = (mixed * 32767).astype(np.int16)
+        mixed_i16 = (mixed * 32768).clip(-32768, 32767).astype(np.int16)
 
         t0 = time.perf_counter()
         sf.write(flac_path, mixed_i16, sample_rate,
