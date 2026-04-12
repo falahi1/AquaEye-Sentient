@@ -103,3 +103,75 @@ def write_metadata(
 
     logger.debug(f"Metadata written → {os.path.basename(meta_path)}")
     return meta_path
+
+
+def write_mixed_metadata(
+    flac_path:   str,
+    units:       list,
+    sample_rate: int,
+    session_id:  str  = None,
+    sensor:      dict = None,
+) -> str:
+    """
+    Write a _meta.json sidecar for a mixed-session FLAC.
+
+    Parameters
+    ----------
+    flac_path   : absolute path to the mixed .flac file
+    units       : list of dicts, one per contributing HydroMoth:
+                  [{"hydromoth_id": "HM_A", "angle_deg": 0, "channel": 0}, ...]
+    sample_rate : Hz — as configured on the HydroMoth devices
+    session_id  : shared session timestamp string (e.g. "20260401_120000")
+    sensor      : dict from serial_reader.get_latest_reading(), or None
+
+    Returns
+    -------
+    Path to the written _meta.json file.
+    """
+    s = sensor or {}
+
+    meta = {
+        "schema_version": "1.1",
+        "written_utc":    datetime.now(timezone.utc).isoformat(),
+        "session_id":     session_id,
+        "audio": {
+            "flac_file":   os.path.basename(flac_path),
+            "mix_type":    "sum_normalised",
+            "units":       units,
+            "sample_rate": sample_rate,
+        },
+        "gps": {
+            "lat":      s.get("gps_lat"),
+            "lon":      s.get("gps_lon"),
+            "alt_m":    s.get("gps_alt_m"),
+            "date":     s.get("gps_date"),
+            "time_utc": s.get("gps_time_utc"),
+        },
+        "water_quality": {
+            "tds_ppm":     s.get("tds_ppm"),
+            "tds_voltage": s.get("tds_voltage"),
+            "turbidity_v": s.get("turbidity_v"),
+            "temp_c":      s.get("temp_c"),
+        },
+        "orientation": {
+            "heading_deg": s.get("heading_deg"),
+        },
+    }
+
+    stem      = os.path.splitext(flac_path)[0]
+    meta_path = stem + "_meta.json"
+    temp_path = meta_path + ".tmp"
+
+    try:
+        with open(temp_path, "w", encoding="utf-8") as f:
+            json.dump(meta, f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(temp_path, meta_path)
+    except Exception as e:
+        logger.error(f"Failed to write mixed metadata for {flac_path}: {e}")
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+
+    logger.debug(f"Mixed metadata written → {os.path.basename(meta_path)}")
+    return meta_path

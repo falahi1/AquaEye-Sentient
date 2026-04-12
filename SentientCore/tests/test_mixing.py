@@ -96,3 +96,47 @@ def test_mix_normalises_output(tmp_path):
     mix_session_to_flac(wav_paths, flac_path)
     mixed, _ = sf.read(flac_path, dtype="float64")
     assert np.max(np.abs(mixed)) <= 1.0 + 1e-6
+
+
+# ---------------------------------------------------------------------------
+# write_mixed_metadata tests
+# ---------------------------------------------------------------------------
+
+def test_write_mixed_metadata_creates_json(tmp_path):
+    from metadata_writer import write_mixed_metadata
+    flac_path = str(tmp_path / "MIXED__20260401_120000.flac")
+    open(flac_path, "w").close()   # empty placeholder
+    units = [
+        {"hydromoth_id": "HM_A", "angle_deg": 0,   "channel": 0},
+        {"hydromoth_id": "HM_B", "angle_deg": 120,  "channel": 1},
+        {"hydromoth_id": "HM_C", "angle_deg": 240,  "channel": 2},
+    ]
+    meta_path = write_mixed_metadata(
+        flac_path=flac_path, units=units,
+        session_id="20260401_120000", sample_rate=96000, sensor=None,
+    )
+    assert os.path.exists(meta_path)
+    assert meta_path.endswith("_meta.json")
+
+
+def test_write_mixed_metadata_schema(tmp_path):
+    import json
+    from metadata_writer import write_mixed_metadata
+    flac_path = str(tmp_path / "MIXED__20260401_120000.flac")
+    open(flac_path, "w").close()
+    units = [
+        {"hydromoth_id": "HM_A", "angle_deg": 0,   "channel": 0},
+        {"hydromoth_id": "HM_B", "angle_deg": 120,  "channel": 1},
+        {"hydromoth_id": "HM_C", "angle_deg": 240,  "channel": 2},
+    ]
+    meta_path = write_mixed_metadata(
+        flac_path=flac_path, units=units,
+        session_id="20260401_120000", sample_rate=96000, sensor=None,
+    )
+    with open(meta_path) as f:
+        meta = json.load(f)
+    assert meta["audio"]["mix_type"] == "sum_normalised"
+    assert len(meta["audio"]["units"]) == 3
+    assert meta["audio"]["units"][0]["hydromoth_id"] == "HM_A"
+    assert meta["session_id"] == "20260401_120000"
+    assert meta["audio"]["sample_rate"] == 96000
