@@ -67,6 +67,7 @@ import struct
 import sys
 import time
 import wave
+from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(__file__))
 
@@ -225,6 +226,11 @@ def format_table(rows: list, headers: list) -> str:
 # Stats helper
 # ---------------------------------------------------------------------------
 
+def ts() -> str:
+    """Return current wall-clock timestamp string for log output."""
+    return datetime.now().strftime("%H:%M:%S.%f")[:-3]
+
+
 def stats(values: list) -> tuple:
     n    = len(values)
     mean = sum(values) / n
@@ -260,58 +266,70 @@ def run_cycle(
     }
 
     cycle_start = time.perf_counter()
+    print(f"  [{ts()}] Cycle {cycle_num} START")
 
     # -- Serial snapshot ------------------------------------------------------
     sensor_data = serial_reader.get_latest_reading() if use_serial else None
 
     # -- Stage (simulate pull) ------------------------------------------------
+    print(f"  [{ts()}] Stage: copying WAV files to staging ...")
     t0 = time.perf_counter()
     stage_test_files(wav_dir, n_files)
     result["t_stage_s"] = round(time.perf_counter() - t0, 2)
+    print(f"  [{ts()}] Stage: done ({result['t_stage_s']} s)")
 
     # -- Stitch ---------------------------------------------------------------
+    print(f"  [{ts()}] Stitch: grouping sessions ...")
     t0 = time.perf_counter()
     sessions = session_stitcher.get_unprocessed_sessions()
     result["t_stitch_s"]  = round(time.perf_counter() - t0, 2)
     result["n_sessions"]  = len(sessions)
+    print(f"  [{ts()}] Stitch: done — {len(sessions)} session(s) ({result['t_stitch_s']} s)")
 
-    # -- Encode + Metadata (per session, per file) ----------------------------
-    encode_times = []
+    # -- Mix + Metadata (one FLAC per session) --------------------------------
+    encode_times     = []
     t_encode_total   = 0.0
     t_metadata_total = 0.0
 
     for session in sessions:
-        for file_entry in session["files"]:
-            wav_path  = file_entry["wav_path"]
-            stem      = os.path.splitext(os.path.basename(wav_path))[0]
-            flac_path = os.path.join(FLAC_FOLDER, f"{stem}_c{cycle_num:03d}.flac")
+        session_id = session["session_id"]
+        wav_paths  = [f["wav_path"] for f in session["files"]]
+        flac_path  = os.path.join(FLAC_FOLDER, f"MIXED__{session_id}_c{cycle_num:03d}.flac")
 
-            # Encode
-            t0     = time.perf_counter()
-            enc    = audio_processor.convert_wav_to_flac(wav_path, flac_path)
-            t_encode_total += time.perf_counter() - t0
+        print(f"  [{ts()}] Mix START: session {session_id} ({len(wav_paths)} files)")
+        t0  = time.perf_counter()
+        enc = audio_processor.mix_session_to_flac(wav_paths, flac_path)
+        t_file = round(time.perf_counter() - t0, 2)
+        t_encode_total += t_file
+        print(f"  [{ts()}] Mix END:   session {session_id} — {t_file} s")
 
-            if enc["success"]:
-                encode_times.append(enc["encode_sec"])
-                result["n_success"] += 1
+        if enc["success"]:
+            encode_times.append(enc["encode_sec"])
+            result["n_success"] += 1
 
-                # Metadata
-                t0 = time.perf_counter()
-                metadata_writer.write_metadata(
-                    flac_path    = flac_path,
-                    hydromoth_id = file_entry["hydromoth_id"],
-                    angle_deg    = file_entry["angle_deg"],
-                    channel      = file_entry["channel"],
-                    sample_rate  = SAMPLE_RATE,
-                    session_id   = session["session_id"],
-                    sensor       = sensor_data,
-                )
-                t_metadata_total += time.perf_counter() - t0
+            units = [
+                {
+                    "hydromoth_id": f["hydromoth_id"],
+                    "angle_deg":    f["angle_deg"],
+                    "channel":      f["channel"],
+                }
+                for f in session["files"]
+            ]
+            t0 = time.perf_counter()
+            metadata_writer.write_mixed_metadata(
+                flac_path   = flac_path,
+                units       = units,
+                sample_rate = SAMPLE_RATE,
+                session_id  = session_id,
+                sensor      = sensor_data,
+            )
+            t_metadata_total += time.perf_counter() - t0
 
-            result["n_files"] += 1
+        result["n_files"] += len(wav_paths)
 
-            # Mark processed so stitcher skips it if cycle is re-run
-            with open(PROCESSED_LOG, "a") as f:
+        # Mark all WAVs processed
+        with open(PROCESSED_LOG, "a") as f:
+            for wav_path in wav_paths:
                 f.write(wav_path + "\n")
 
     result["t_encode_s"]   = round(t_encode_total,   2)
@@ -321,6 +339,7 @@ def run_cycle(
         sum(encode_times) / len(encode_times) if encode_times else 0.0, 2
     )
 
+    print(f"  [{ts()}] Cycle {cycle_num} END — total {result['t_total_s']} s  encode {result['t_encode_s']} s")
     return result
 
 
@@ -403,23 +422,25 @@ def main():
     print("    A3 — FLAC encode time per file (assumed 8 s)")
     print("    A4 — Active window overhead   (assumed 20 s)")
     print()
-    print("  >>> Start recording on your inline power meter NOW <<<")
+    print(f"  Script start time    : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print()
-    input("  Press ENTER when ready ...")
+    print("  >>> Start recording on your inline power meter NOW <<<")
+    print("  (Running headless — no input required)")
     print()
 
     # ---- Warm-up ------------------------------------------------------------
+    print(f"  [{ts()}] Warm-up cycle START (excluded from results)")
     print("  Warm-up cycle (excluded from results) ...", end="", flush=True)
     clear_staging_and_log()
     run_cycle(args.wav_dir, actual_files, use_serial, cycle_num=0)
-    print(" done")
+    print(f" done  [{ts()}]")
     print()
 
     # ---- Benchmark cycles ---------------------------------------------------
     results = []
     for i in range(1, args.cycles + 1):
         clear_staging_and_log()
-        print(f"  Cycle {i:2d}/{args.cycles} ...", end="", flush=True)
+        print(f"  [{ts()}] --- Benchmark cycle {i}/{args.cycles} ---")
         r = run_cycle(args.wav_dir, actual_files, use_serial, cycle_num=i)
         results.append(r)
         print(
@@ -496,6 +517,8 @@ def main():
     print("  Record the sustained mA reading from your inline meter during")
     print("  the encode phases and log it separately as Assumption A1.")
     print()
+    print(f"  Script end time      : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print("  === BENCHMARK COMPLETE ===")
 
 
 if __name__ == "__main__":
